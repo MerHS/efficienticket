@@ -239,3 +239,6 @@ class EfficientNet(nn.Module):
         valid_models = ['efficientnet-b' + str(i) for i in range(num_models)]
         if model_name not in valid_models:
             raise ValueError('model_name should be one of: ' + ', '.join(valid_models))
+
+def get_model(args):
+    return EfficientNet.from_name(args.model)
