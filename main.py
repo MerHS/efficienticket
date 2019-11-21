@@ -33,6 +33,10 @@ def main(args):
     if not data_dir.exists():
         data_dir.mkdir()
 
+    save_dir = Path(args.save_dir)
+    if not save_dir.exists():
+        save_dir.mkdir()
+
     if args.model.startswith('efficientnet'):
         from models.efficientnet import get_model
     elif args.model.startswith('resnet'):
@@ -45,22 +49,24 @@ def main(args):
     train_loader, test_loader = get_dataset(args)
     trainer = LotteryTrainer(args, model, train_loader, test_loader)
 
-    top1 = 0
+    top1_list = []
+    
     for epoch in range(1, args.epoch + 1):
         trainer.train(epoch)
-        top1 = trainer.test(epoch)
+        top1_list.append(trainer.test(epoch))
+        print(f'-*- Top1 Best: {max(top1_list):.3f}')
 
-    print("Best Accuracy of Pruned Model: ", best_acc_pruned)
+    # print("Best Accuracy of Pruned Model: ", best_acc_pruned)
 
-    print("Original Model Accuracy: ", best_acc_full)
-    print("Pruned Model Accuracy: ", best_acc_pruned)
-    print("Accuracy Difference Between Original Model & Pruned Model: ", (best_acc_full - best_acc_pruned))
-    print("Accuracy Difference should be under 1% (accuracy difference < 1%)")
+    # print("Original Model Accuracy: ", best_acc_full)
+    # print("Pruned Model Accuracy: ", best_acc_pruned)
+    # print("Accuracy Difference Between Original Model & Pruned Model: ", (best_acc_full - best_acc_pruned))
+    # print("Accuracy Difference should be under 1% (accuracy difference < 1%)")
 
-    print("Your Global Pruning Percentage: ", pruning_perc, "%")
-    print("remaining params: ", dividend)
-    print("total params: ", divisor)
-    print("Global Pruning Percentage: ", 100 * (1 - dividend / divisor), "%")
+    # print("Your Global Pruning Percentage: ", pruning_perc, "%")
+    # print("remaining params: ", dividend)
+    # print("total params: ", divisor)
+    # print("Global Pruning Percentage: ", 100 * (1 - dividend / divisor), "%")
 
 
 def parse_args():
@@ -83,7 +89,7 @@ def parse_args():
     parser.add_argument('--data_size', default=0, type=int, help='Total training image count. if 0, use every train data')
 
     parser.add_argument('--data_dir', default='./data', help='Path to train/test data root directory')
-    parser.add_argument('--save_dir', type=str, default='./results', help='Path to save network dump directory')
+    parser.add_argument('--save_dir', type=str, default='./net', help='Path to save network dump directory')
     parser.add_argument('--load', type=str, default="", help='Path to load network weights (if non-empty)')
 
     parser.add_argument('--min_lr', type=float, default=0.04, help='minimum lerning rate (for lr))')

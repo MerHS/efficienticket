@@ -77,7 +77,7 @@ class LotteryTrainer():
         for m in self.model.modules():
             if isinstance(m, nn.Conv2d):
                 size = m.weight.data.numel()
-                conv_weights[index:(index+size)] = m.weight.data.view(-1).abs().clone()
+                conv_weights[index:(index + size)] = m.weight.data.view(-1).abs().clone()
                 index += size
 
         y, i = torch.sort(conv_weights)
@@ -97,7 +97,7 @@ class LotteryTrainer():
                     zero_flag = True
                 print('layer index: {:d} \t total params: {:d} \t remaining params: {:d}'.
                     format(k, mask.numel(), int(torch.sum(mask))))
-        print('Total conv params: {}, Pruned conv params: {}, Pruned ratio: {}'.format(total, pruned, pruned/total))
+        print('Total conv params: {}, Pruned conv params: {}, Pruned ratio: {}'.format(total, pruned, pruned / total))
 
     def save_initial_weight(self, save_path):
         pass
