@@ -6,28 +6,34 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
 
+import numpy as np
 from tqdm import tqdm
 
 
 def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
-    batch_size = target.size(0)
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
 
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
 
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-        res.append(correct_k.mul_(100.0 / batch_size))
-    return res
+        res = []
+        for k in topk:
+            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
-    def __init__(self):
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
         self.reset()
 
     def reset(self):
@@ -42,6 +48,27 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+class ProgressMeter(object):
+    def __init__(self, num_batches, meters, prefix=""):
+        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
+        self.meters = meters
+        self.prefix = prefix
+
+    def display(self, batch):
+        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        entries += [str(meter) for meter in self.meters]
+        print('\t'.join(entries))
+
+    def _get_batch_fmtstr(self, num_batches):
+        num_digits = len(str(num_batches // 1))
+        fmt = '{:' + str(num_digits) + 'd}'
+        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+
 
 class LotteryTrainer():
     def __init__(self, args, model, train_loader, test_loader):
@@ -53,10 +80,15 @@ class LotteryTrainer():
         self.model_dir = Path(args.save_dir)
         self.data_dir = Path(args.data_dir)
 
-        steps_per_epoch = len(train_loader) / args.batch_size
+        steps_per_epoch = len(train_loader)
         div_factor = args.max_lr / args.min_lr
 
         self.model = model
+        self.mask = None
+
+        self.remain_perc = 100.0
+        self.perc_mult = args.pruning_perc
+
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.SGD(model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
@@ -66,14 +98,20 @@ class LotteryTrainer():
             model = model.cuda()
             self.criterion = self.criterion.cuda()
 
+        self.save_initial_weight()
+
+    def step_perc(self):
+        self.remain_perc *= self.perc_mult
+        self.load_initial_weight()
+
     def prune_weight(self, pruning_perc):
+        """
+        pruning weight and set mask
+        """
         total = 0
-        total_nonzero = 0
         for m in self.model.modules():
             if isinstance(m, nn.Conv2d):
                 total += m.weight.data.numel()
-                mask = m.weight.data.abs().clone().gt(0).float().cuda()
-                total_nonzero += torch.sum(mask)
 
         conv_weights = torch.zeros(total)
         index = 0
@@ -83,72 +121,70 @@ class LotteryTrainer():
                 conv_weights[index:(index + size)] = m.weight.data.view(-1).abs().clone()
                 index += size
 
-        y, i = torch.sort(conv_weights)
-        thre_index = total - total_nonzero + int(total_nonzero * pruning_perc)
-        thre = y[int(thre_index)]
-        pruned = 0
+        threshold = np.percentile(conv_weights.numpy(), pruning_perc)
         
-        print('Pruning threshold: {}'.format(thre))
-
+        self.mask = []
         for k, m in enumerate(self.model.modules()):
             if isinstance(m, nn.Conv2d):
-                weight_copy = m.weight.data.abs().clone()
-                mask = weight_copy.gt(thre).float().cuda()
-                pruned = pruned + mask.numel() - torch.sum(mask)
+                weight_copy = Variable(m.weight.data.clone(), requires_grad=False)
+                mask = weight_copy.gt(threshold).float().cuda()
                 m.weight.data.mul_(mask)
+                self.mask.append(mask)
                 
-                print('layer index: {:d} \t total params: {:d} \t remaining params: {:d}'.
-                    format(k, mask.numel(), int(torch.sum(mask))))
+    def get_save_name(self, suffix):
+        return f'{self.args.model}-{self.args.dataset}-{self.args.save_name}-{suffix}.pth'
 
-        print('Total conv params: {}, Pruned conv params: {}, Pruned ratio: {}'.format(total, pruned, pruned / total))
+    def save_weight(self, suffix):
+        # TODO: save mask
+        save_name = self.get_save_name(suffix)
+        torch.save(self.model.state_dict(), str(self.model_dir / save_name))
 
     def save_initial_weight(self):
-        with self.model_dir.open('w') as f:
-            
-            pass
+        self.save_weight('init')
 
     def load_initial_weight(self):
-        pass
+        save_name = self.get_save_name('init')
+        self.model.load_state_dict(torch.load(str(self.model_dir / save_name)))
 
-    def reset_weight(self, rand_init=False):
-        pass
-
-    def train(self, epoch, prune=False):
-        batch_time = AverageMeter()
-        data_time = AverageMeter()
-        losses = AverageMeter()
-        top1 = AverageMeter()
-        top5 = AverageMeter()
+    def train(self, epoch, prune=True):
+        batch_time = AverageMeter('Time', ':6.3f')
+        data_time = AverageMeter('Data', ':6.3f')
+        losses = AverageMeter('Loss', ':.4e')
+        top1 = AverageMeter('Acc@1', ':6.2f')
+        top5 = AverageMeter('Acc@5', ':6.2f')
+        progress = ProgressMeter(
+            len(self.train_loader),
+            [batch_time, data_time, losses, top1, top5],
+            prefix="Epoch: [{}]".format(epoch))
 
         # switch to train mode
         self.model.train()
 
         end = time.time()
-
-        for i, (input, target) in enumerate(tqdm(self.train_loader)):
+        for i, (images, target) in enumerate(self.train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
 
-            target = target.cuda()
-            input_var = torch.autograd.Variable(input)
-            target_var = torch.autograd.Variable(target)
+            images = images.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
+
+            if prune:
+                self.prune_weight(self.remain_perc)
 
             # compute output
-            output = self.model(input_var)
-            loss = self.criterion(output, target_var)
+            output = self.model(images)
+            loss = self.criterion(output, target)
 
             # measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-            losses.update(loss.data[0], input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
+            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            losses.update(loss.item(), images.size(0))
+            top1.update(acc1[0], images.size(0))
+            top5.update(acc5[0], images.size(0))
 
             # compute gradient and do SGD step
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-
-            # OneCycleLR scheduler requires step function for each iteration
             self.scheduler.step()
 
             # measure elapsed time
@@ -156,49 +192,46 @@ class LotteryTrainer():
             end = time.time()
 
             if i % self.args.print_freq == 0:
-                print(f'Epoch: [{epoch}][{i}/{len(self.train_loader)}]\t'
-                    f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    f'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                    f'Loss {loss.esval:.4f} ({losses.avg:.4f})\t'
-                    f'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                    f'Prec@5 {top5.val:.3f} ({top5.avg:.3f})')
+                progress.display(i)
 
     def test(self, epoch):
-        batch_time = AverageMeter()
-        losses = AverageMeter()
-        top1 = AverageMeter()
-        top5 = AverageMeter()
+        batch_time = AverageMeter('Time', ':6.3f')
+        losses = AverageMeter('Loss', ':.4e')
+        top1 = AverageMeter('Acc@1', ':6.2f')
+        top5 = AverageMeter('Acc@5', ':6.2f')
+        progress = ProgressMeter(
+            len(self.test_loader),
+            [batch_time, losses, top1, top5],
+            prefix=f'Test {epoch}: ')
 
         # switch to evaluate mode
         self.model.eval()
 
-        end = time.time()
-        for i, (input, target) in enumerate(self.val_loader):
-            target = target.cuda()
-            input_var = torch.autograd.Variable(input, volatile=True)
-            target_var = torch.autograd.Variable(target, volatile=True)
-
-            # compute output
-            output = self.model(input_var)
-            loss = self.criterion(output, target_var)
-
-            # measure accuracy and record loss
-            prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-            losses.update(loss.data[0], input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
+        with torch.no_grad():
             end = time.time()
+            for i, (images, target) in enumerate(self.test_loader):
+                images = images.cuda(non_blocking=True)
+                target = target.cuda(non_blocking=True)
 
-            if i % self.args.print_freq == 0:
-                print(f'Test: [{i}/{self.val_loader}]\t'
-                    f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
-                    f'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                    f'Prec@5 {top5.val:.3f} ({top5.avg:.3f})')
+                # compute output
+                output = self.model(images)
+                loss = self.criterion(output, target)
 
-        print(f' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}')
+                # measure accuracy and record loss
+                acc1, acc5 = accuracy(output, target, topk=(1, 5))
+                losses.update(loss.item(), images.size(0))
+                top1.update(acc1[0], images.size(0))
+                top5.update(acc5[0], images.size(0))
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                if i % self.args.print_freq == 0:
+                    progress.display(i)
+
+            # TODO: this should also be done with the ProgressMeter
+            print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+                .format(top1=top1, top5=top5))
 
         return top1.avg

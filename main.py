@@ -43,20 +43,23 @@ def main(args):
         raise NotImplementedError(f"Unsupported model: {args.model}")
 
     model = get_model(args)
-    model = torch.nn.DataParallel()
+    model = torch.nn.DataParallel(model)
 
     train_loader, test_loader = get_dataset(args)
     trainer = LotteryTrainer(args, model, train_loader, test_loader)
 
     print(f' * Total params: {(sum(p.numel() for p in model.parameters()) / 1000000.0):.2f}M')
 
-    top1_list = []
-    
-    for epoch in range(1, args.epoch + 1):
-        print(f'-*- Epoch {epoch} / {args.epoch}')
-        trainer.train(epoch)
-        top1_list.append(trainer.test(epoch))
-        print(f'-*- Top1 Best: {max(top1_list):.3f}')
+    for prune_iter in range(1, args.pruning_count + 1):
+
+        top1_list = []
+        for epoch in range(1, args.epoch + 1):
+            print(f'-*- Epoch {epoch} / {args.epoch}')
+            trainer.train(epoch)
+            top1_list.append(trainer.test(epoch))
+            print(f'-*- Top1 Best: {max(top1_list):.3f}')
+
+        trainer.step_perc()
 
     # print("Best Accuracy of Pruned Model: ", best_acc_pruned)
 
@@ -80,8 +83,8 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100', 'imagenet'],
                         help='Dataset (default: cifar10)')
     parser.add_argument('--prune', type=str, default='lottery', choices=['random', 'lottery', 'lottery-simp', 'rigl'])
-    parser.add_argument('--pruning_perc', type=float, default=0.2, choices='iterative pruning percentage')
-    parser.add_argument('--pruning_count', type=int, default=25, choices='total pruning cycle count')
+    parser.add_argument('--pruning_perc', type=float, default=0.2, help='iterative pruning percentage')
+    parser.add_argument('--pruning_count', type=int, default=25, help='total pruning cycle count')
     parser.add_argument('--rewind_iter', type=int, default=500, help='rewind iteration point for lottery-simp')
 
     parser.add_argument('--cpu', action='store_true', help='If set, use cpu only')
@@ -107,6 +110,7 @@ def parse_args():
     parser.add_argument('--steps', type=str, default='10,80,120', help='epochs for StepLR')
     
     parser.add_argument('--print_freq', type=int, default=100, help='log step frequency')
+    parser.add_argument('--save_name', type=str, default='base', help='suffix of save file')
     parser.add_argument('--seed', type=int, default=-1, help='if positive, apply random seed')
 
     args = parser.parse_args()
