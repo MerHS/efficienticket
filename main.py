@@ -2,8 +2,6 @@ import argparse
 from pathlib import Path
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 
 from dataset import get_dataset
@@ -42,16 +40,20 @@ def main(args):
     elif args.model.startswith('resnet'):
         from models.resnet import get_model
     else:
-        raise NotImplementedError(f"unsupported model: {args.model}")
+        raise NotImplementedError(f"Unsupported model: {args.model}")
 
     model = get_model(args)
     model = torch.nn.DataParallel()
+
     train_loader, test_loader = get_dataset(args)
     trainer = LotteryTrainer(args, model, train_loader, test_loader)
+
+    print(f' * Total params: {(sum(p.numel() for p in model.parameters()) / 1000000.0):.2f}M')
 
     top1_list = []
     
     for epoch in range(1, args.epoch + 1):
+        print(f'-*- Epoch {epoch} / {args.epoch}')
         trainer.train(epoch)
         top1_list.append(trainer.test(epoch))
         print(f'-*- Top1 Best: {max(top1_list):.3f}')
@@ -70,37 +72,40 @@ def main(args):
 
 
 def parse_args():
-    desc = "tag2pix: Line Art Colorization using Text Tag"
+    desc = "efficienticket: efficiency benchmark of lottery ticket hypothesis"
     parser = argparse.ArgumentParser(description=desc)
 
     parser.add_argument('--model', type=str, default='efficientnet-b0', choices=AVAILABLE_MODELS,
                         help='Model Types (default: efficientnet-b0)')
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100', 'imagenet'],
                         help='Dataset (default: cifar10)')
+    parser.add_argument('--prune', type=str, default='lottery', choices=['random', 'lottery', 'lottery-simp', 'rigl'])
+    parser.add_argument('--pruning_perc', type=float, default=0.2, choices='iterative pruning percentage')
+    parser.add_argument('--pruning_count', type=int, default=25, choices='total pruning cycle count')
+    parser.add_argument('--rewind_iter', type=int, default=500, help='rewind iteration point for lottery-simp')
 
     parser.add_argument('--cpu', action='store_true', help='If set, use cpu only')
     parser.add_argument('--test', action='store_true', help='Colorize line arts in test_dir based on `tag_txt`')
     
     parser.add_argument('--thread', type=int, default=8, help='total thread count of data loader')
-    parser.add_argument('--epoch', type=int, default=80, help='The number of epochs to run')
+    parser.add_argument('--epoch', type=int, default=160, help='The number of epochs to run')
 
     parser.add_argument('--batch_size', type=int, default=64, help='Total batch size')
-    parser.add_argument('--input_size', type=int, default=256, help='Width / Height of input image (must be rectangular)')
-    parser.add_argument('--data_size', default=0, type=int, help='Total training image count. if 0, use every train data')
+    # parser.add_argument('--input_size', type=int, default=224, help='Width / Height of input image (must be rectangular)')
+    parser.add_argument('--data_size', default=0, type=int, help='training image count per epoch. if 0, use every train data')
 
     parser.add_argument('--data_dir', default='./data', help='Path to train/test data root directory')
     parser.add_argument('--save_dir', type=str, default='./net', help='Path to save network dump directory')
     parser.add_argument('--load', type=str, default="", help='Path to load network weights (if non-empty)')
 
+    parser.add_argument('--optim', type=str, default='onecycle', choices=['onecycle', 'step', 'warmup'])
     parser.add_argument('--min_lr', type=float, default=0.04, help='minimum lerning rate (for lr))')
-    parser.add_argument('--max_lr', type=float, default=0.5, help='maximum learning rate')
+    parser.add_argument('--max_lr', type=float, default=0.5, help='maximum learning rate (default)')
     parser.add_argument('--momentum', type=float, default=0.9, help='sgd momentum')
     parser.add_argument('--decay', type=float, default=3e-6, help='weight decay')
     parser.add_argument('--strategy', type=str, default='cos', choices=['cos', 'linear'], help='annealing strategy (default: cos)')
-
-    parser.add_argument('--pruning_perc', type=float, default=0.2, help='iterative pruning percentage')
-    parser.add_argument('--pruning_count', type=int, default=8, help='total count of pruning iteration')
-
+    parser.add_argument('--steps', type=str, default='10,80,120', help='epochs for StepLR')
+    
     parser.add_argument('--print_freq', type=int, default=100, help='log step frequency')
     parser.add_argument('--seed', type=int, default=-1, help='if positive, apply random seed')
 

@@ -2,9 +2,12 @@
 CIFAR-10 trainer with iterative pruning
 """
 import time
+from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+from tqdm import tqdm
 
 
 def accuracy(output, target, topk=(1,)):
@@ -47,6 +50,9 @@ class LotteryTrainer():
         self.train_loader = train_loader
         self.test_loader = test_loader
         
+        self.model_dir = Path(args.save_dir)
+        self.data_dir = Path(args.data_dir)
+
         steps_per_epoch = len(train_loader) / args.batch_size
         div_factor = args.max_lr / args.min_lr
 
@@ -61,9 +67,6 @@ class LotteryTrainer():
             self.criterion = self.criterion.cuda()
 
     def prune_weight(self, pruning_perc):
-        """
-
-        """
         total = 0
         total_nonzero = 0
         for m in self.model.modules():
@@ -81,28 +84,30 @@ class LotteryTrainer():
                 index += size
 
         y, i = torch.sort(conv_weights)
-        # thre_index = int(total * args.percent)
         thre_index = total - total_nonzero + int(total_nonzero * pruning_perc)
         thre = y[int(thre_index)]
         pruned = 0
+        
         print('Pruning threshold: {}'.format(thre))
-        zero_flag = False
+
         for k, m in enumerate(self.model.modules()):
             if isinstance(m, nn.Conv2d):
                 weight_copy = m.weight.data.abs().clone()
                 mask = weight_copy.gt(thre).float().cuda()
                 pruned = pruned + mask.numel() - torch.sum(mask)
                 m.weight.data.mul_(mask)
-                if int(torch.sum(mask)) == 0:
-                    zero_flag = True
+                
                 print('layer index: {:d} \t total params: {:d} \t remaining params: {:d}'.
                     format(k, mask.numel(), int(torch.sum(mask))))
+
         print('Total conv params: {}, Pruned conv params: {}, Pruned ratio: {}'.format(total, pruned, pruned / total))
 
-    def save_initial_weight(self, save_path):
-        pass
+    def save_initial_weight(self):
+        with self.model_dir.open('w') as f:
+            
+            pass
 
-    def load_initial_weight(self, save_path):
+    def load_initial_weight(self):
         pass
 
     def reset_weight(self, rand_init=False):
@@ -120,11 +125,11 @@ class LotteryTrainer():
 
         end = time.time()
 
-        for i, (input, target) in enumerate(self.train_loader):
+        for i, (input, target) in enumerate(tqdm(self.train_loader)):
             # measure data loading time
             data_time.update(time.time() - end)
 
-            target = target.cuda(async=True)
+            target = target.cuda()
             input_var = torch.autograd.Variable(input)
             target_var = torch.autograd.Variable(target)
 
@@ -169,7 +174,7 @@ class LotteryTrainer():
 
         end = time.time()
         for i, (input, target) in enumerate(self.val_loader):
-            target = target.cuda(async=True)
+            target = target.cuda()
             input_var = torch.autograd.Variable(input, volatile=True)
             target_var = torch.autograd.Variable(target, volatile=True)
 
