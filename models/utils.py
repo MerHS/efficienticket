@@ -14,6 +14,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.utils import model_zoo
 
+from .prune_layer import to_var
+
 ########################################################################
 ############### HELPERS FUNCTIONS FOR MODEL ARCHITECTURE ###############
 ########################################################################
@@ -109,6 +111,15 @@ class Conv2dDynamicSamePadding(nn.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1, bias=True):
         super().__init__(in_channels, out_channels, kernel_size, stride, 0, dilation, groups, bias)
         self.stride = self.stride if len(self.stride) == 2 else [self.stride[0]] * 2
+        self.mask_flag = False
+
+    def set_mask(self, mask):
+        self.mask = to_var(mask, requires_grad=False)
+        self.weight.data = self.weight.data * self.mask.data
+        self.mask_flag = True
+    
+    def get_mask(self):
+        return self.mask
 
     def forward(self, x):
         ih, iw = x.size()[-2:]
@@ -119,7 +130,13 @@ class Conv2dDynamicSamePadding(nn.Conv2d):
         pad_w = max((ow - 1) * self.stride[1] + (kw - 1) * self.dilation[1] + 1 - iw, 0)
         if pad_h > 0 or pad_w > 0:
             x = F.pad(x, [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2])
-        return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        
+        if self.mask_flag:
+            # applying pruning mask
+            weight = self.weight * self.mask
+            return F.conv2d(x, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        else:
+            return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
 
 class Conv2dStaticSamePadding(nn.Conv2d):
@@ -141,11 +158,25 @@ class Conv2dStaticSamePadding(nn.Conv2d):
             self.static_padding = nn.ZeroPad2d((pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2))
         else:
             self.static_padding = Identity()
+        self.mask_flag = False
+
+    def set_mask(self, mask):
+        self.mask = to_var(mask, requires_grad=False)
+        self.weight.data = self.weight.data * self.mask.data
+        self.mask_flag = True
+    
+    def get_mask(self):
+        return self.mask
 
     def forward(self, x):
         x = self.static_padding(x)
-        x = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
-        return x
+        
+        if self.mask_flag:
+            # applying pruning mask
+            weight = self.weight * self.mask
+            return F.conv2d(x, weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        else:
+            return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
 
 
 class Identity(nn.Module):

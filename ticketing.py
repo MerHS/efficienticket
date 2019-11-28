@@ -6,7 +6,6 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 
 import numpy as np
 from tqdm import tqdm
@@ -137,14 +136,10 @@ class LotteryTrainer():
                 index += size
 
         threshold = np.percentile(conv_weights.numpy(), pruning_perc)
-        
-        self.mask = []
+
         for k, m in enumerate(self.model.modules()):
             if isinstance(m, nn.Conv2d):
-                weight_copy = Variable(m.weight.data.clone(), requires_grad=False)
-                mask = weight_copy.gt(threshold).float().cuda()
-                m.weight.data.mul_(mask)
-                self.mask.append(mask)
+                m.set_mask(m.weight.data.abs().gt(threshold).float().cuda())                
                 
     def get_save_name(self, suffix):
         return f'{self.args.model}-{self.args.dataset}-{self.args.save_name}-{suffix}.pth'
@@ -185,7 +180,7 @@ class LotteryTrainer():
             target = target.cuda(non_blocking=True)
 
             if self.args.prune != 'disable':
-                self.prune_weight(1 - self.remain_perc)
+                self.prune_weight(100. - self.remain_perc)
 
             # compute output
             output = self.model(images)
