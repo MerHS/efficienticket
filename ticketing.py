@@ -91,7 +91,10 @@ class LotteryTrainer():
             model = model.cuda()
             self.criterion = self.criterion.cuda()
 
-        self.save_initial_weight()
+        if self.args.prune == 'lottery-simp':
+            self.simp_saved = False
+        else:
+            self.save_initial_weight()
 
     def init_trainer(self):
         args = self.args
@@ -181,6 +184,11 @@ class LotteryTrainer():
 
             if self.args.prune != 'disable':
                 self.prune_weight(100. - self.remain_perc)
+
+            iter_count = epoch * iters + i
+            if not self.simp_saved and iter_count == self.args.rewind_iter and self.args.prune == 'lottery-simp':
+                self.simp_saved = True
+                self.save_initial_weight()
 
             # compute output
             output = self.model(images)
