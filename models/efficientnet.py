@@ -241,4 +241,11 @@ class EfficientNet(nn.Module):
             raise ValueError('model_name should be one of: ' + ', '.join(valid_models))
 
 def get_model(args):
-    return EfficientNet.from_name(args.model)
+    if args.dataset == 'cifar10':
+        num_classes = 10
+    elif args.dataset == 'cifar100':
+        num_classes = 100
+    elif args.dataset == 'imagenet':
+        num_classes = 1000
+
+    return EfficientNet.from_name(args.model, override_params={'num_classes': num_classes})

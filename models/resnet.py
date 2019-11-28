@@ -170,6 +170,8 @@ def get_model(args):
     elif args.dataset == 'imagenet':
         num_classes = 1000
 
+    print(f'num_classes: {num_classes}')
+
     if args.model == 'resnet-18':
         return resnet18(num_classes=num_classes)
     elif args.model == 'resnet-34':
