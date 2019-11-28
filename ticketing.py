@@ -119,7 +119,7 @@ class LotteryTrainer():
             if self.args.strategy == 'cos':
                 next_sched = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epoch)
             else:
-                next_sched = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
+                next_sched = optim.lr_scheduler.MultiStepLR(self.optimizer, steps[1:])
             self.scheduler = GradualWarmupScheduler(self.optimizer, 
                 multiplier=1., total_epoch=steps[0], after_scheduler=next_sched)
 

@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=-1, help='if positive, apply random seed')
 
     args = parser.parse_args()
-
+    print(args)
     return args
 
 
