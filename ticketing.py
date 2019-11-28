@@ -11,7 +11,7 @@ import torch.optim as optim
 import numpy as np
 from tqdm import tqdm
 
-from .warmup import GradualWarmupScheduler
+from models.warmup import GradualWarmupScheduler
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -116,7 +116,7 @@ class LotteryTrainer():
         elif self.sched_type == 'step':
             self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
         elif self.sched_type == 'warmup':
-            if self.args.startegy == 'cos':
+            if self.args.strategy == 'cos':
                 next_sched = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epoch)
             else:
                 next_sched = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
@@ -193,7 +193,7 @@ class LotteryTrainer():
                 self.prune_weight(100. - self.remain_perc)
 
             iter_count = epoch * iters + i
-            if not self.simp_saved and iter_count == self.args.rewind_iter and self.args.prune == 'lottery-simp':
+            if self.args.prune == 'lottery-simp' and not self.simp_saved and iter_count == self.args.rewind_iter:
                 self.simp_saved = True
                 self.save_initial_weight()
 
