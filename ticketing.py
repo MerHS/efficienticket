@@ -6,10 +6,12 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
 
 import numpy as np
 from tqdm import tqdm
 
+from .warmup import GradualWarmupScheduler
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -101,6 +103,7 @@ class LotteryTrainer():
 
         steps_per_epoch = len(self.train_loader)
         div_factor = args.max_lr / args.min_lr
+        steps = [int(x.strip()) for x in args.steps.split(',')]
 
         self.sched_type = args.sched
 
@@ -108,13 +111,17 @@ class LotteryTrainer():
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
 
         if self.sched_type == 'onecycle':
-            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
+            self.scheduler = optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
                 epochs=args.epoch, steps_per_epoch=steps_per_epoch, div_factor=div_factor, anneal_strategy=args.strategy)
         elif self.sched_type == 'step':
-            steps = [int(x.strip()) for x in args.steps.split(',')]
-            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
+            self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
         elif self.sched_type == 'warmup':
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer)
+            if self.args.startegy == 'cos':
+                next_sched = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epoch)
+            else:
+                next_sched = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
+            self.scheduler = GradualWarmupScheduler(self.optimizer, 
+                multiplier=1., total_epoch=steps[0], after_scheduler=next_sched)
 
     def step_perc(self):
         self.remain_perc *= self.perc_mult
