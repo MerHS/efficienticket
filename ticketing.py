@@ -80,19 +80,13 @@ class LotteryTrainer():
         self.model_dir = Path(args.save_dir)
         self.data_dir = Path(args.data_dir)
 
-        steps_per_epoch = len(train_loader)
-        div_factor = args.max_lr / args.min_lr
-
         self.model = model
         self.mask = None
 
         self.remain_perc = 100.0
         self.perc_mult = args.pruning_perc
 
-        self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
-        self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
-            epochs=args.epoch, steps_per_epoch=steps_per_epoch, div_factor=div_factor, anneal_strategy=args.strategy)
+        self.init_trainer()    
 
         if not args.cpu:
             model = model.cuda()
@@ -100,9 +94,30 @@ class LotteryTrainer():
 
         self.save_initial_weight()
 
+    def init_trainer(self):
+        args = self.args
+
+        steps_per_epoch = len(self.train_loader)
+        div_factor = args.max_lr / args.min_lr
+
+        self.sched_type = args.sched
+
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
+
+        if self.sched_type == 'onecycle':
+            self.scheduler = torch.optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
+                epochs=args.epoch, steps_per_epoch=steps_per_epoch, div_factor=div_factor, anneal_strategy=args.strategy)
+        elif self.sched_type == 'step':
+            steps = [int(x.strip()) for x in args.steps.split(',')]
+            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
+        elif self.sched_type == 'warmup':
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer)
+
     def step_perc(self):
         self.remain_perc *= self.perc_mult
         self.load_initial_weight()
+        self.init_trainer()
 
     def prune_weight(self, pruning_perc):
         """
@@ -146,7 +161,7 @@ class LotteryTrainer():
         save_name = self.get_save_name('init')
         self.model.load_state_dict(torch.load(str(self.model_dir / save_name)))
 
-    def train(self, epoch, prune=True):
+    def train(self, epoch):
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
         losses = AverageMeter('Loss', ':.4e')
@@ -161,6 +176,7 @@ class LotteryTrainer():
         self.model.train()
 
         end = time.time()
+        iters = len(self.train_loader)
         for i, (images, target) in enumerate(self.train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
@@ -168,8 +184,8 @@ class LotteryTrainer():
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            if prune:
-                self.prune_weight(self.remain_perc)
+            if self.args.prune != 'disable':
+                self.prune_weight(1 - self.remain_perc)
 
             # compute output
             output = self.model(images)
@@ -185,7 +201,11 @@ class LotteryTrainer():
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            self.scheduler.step()
+
+            if self.sched_type == 'onecycle':
+                self.scheduler.step()
+            elif self.sched_type == 'sgdr':
+                self.scheduler.step((epoch - 1) + i / iters)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -193,6 +213,9 @@ class LotteryTrainer():
 
             if i % self.args.print_freq == 0:
                 progress.display(i)
+
+        if self.sched_type == 'step':
+            self.scheduler.step()
 
     def test(self, epoch):
         batch_time = AverageMeter('Time', ':6.3f')

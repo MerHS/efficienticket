@@ -82,9 +82,9 @@ def parse_args():
                         help='Model Types (default: efficientnet-b0)')
     parser.add_argument('--dataset', type=str, default='cifar10', choices=['cifar10', 'cifar100', 'imagenet'],
                         help='Dataset (default: cifar10)')
-    parser.add_argument('--prune', type=str, default='lottery', choices=['random', 'lottery', 'lottery-simp', 'rigl'])
+    parser.add_argument('--prune', type=str, default='lottery', choices=['random', 'lottery', 'lottery-simp', 'rigl', 'disable'])
     parser.add_argument('--pruning_perc', type=float, default=0.2, help='iterative pruning percentage')
-    parser.add_argument('--pruning_count', type=int, default=25, help='total pruning cycle count')
+    parser.add_argument('--pruning_count', type=int, default=15, help='total pruning cycle count')
     parser.add_argument('--rewind_iter', type=int, default=500, help='rewind iteration point for lottery-simp')
 
     parser.add_argument('--cpu', action='store_true', help='If set, use cpu only')
@@ -101,9 +101,9 @@ def parse_args():
     parser.add_argument('--save_dir', type=str, default='./net', help='Path to save network dump directory')
     parser.add_argument('--load', type=str, default="", help='Path to load network weights (if non-empty)')
 
-    parser.add_argument('--optim', type=str, default='onecycle', choices=['onecycle', 'step', 'warmup'])
-    parser.add_argument('--min_lr', type=float, default=0.04, help='minimum lerning rate (for lr))')
-    parser.add_argument('--max_lr', type=float, default=0.5, help='maximum learning rate (default)')
+    parser.add_argument('--sched', type=str, default='onecycle', choices=['onecycle', 'step', 'sgdr'])
+    parser.add_argument('--min_lr', type=float, default=0.1, help='minimum lerning rate (for lr))')
+    parser.add_argument('--max_lr', type=float, default=1.0, help='maximum learning rate (default)')
     parser.add_argument('--momentum', type=float, default=0.9, help='sgd momentum')
     parser.add_argument('--decay', type=float, default=3e-6, help='weight decay')
     parser.add_argument('--strategy', type=str, default='cos', choices=['cos', 'linear'], help='annealing strategy (default: cos)')
