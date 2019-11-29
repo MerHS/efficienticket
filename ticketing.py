@@ -108,20 +108,24 @@ class LotteryTrainer():
         self.sched_type = args.sched
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
-
+        
         if self.sched_type == 'onecycle':
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
             self.scheduler = optim.lr_scheduler.OneCycleLR(self.optimizer, args.max_lr,
                 epochs=args.epoch, steps_per_epoch=steps_per_epoch, div_factor=div_factor, anneal_strategy=args.strategy)
         elif self.sched_type == 'step':
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.max_lr, momentum=args.momentum, weight_decay=args.decay)
             self.scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, steps)
         elif self.sched_type == 'warmup':
+            self.optimizer = torch.optim.SGD(self.model.parameters(), lr=args.min_lr, momentum=args.momentum, weight_decay=args.decay)
             if self.args.strategy == 'cos':
-                next_sched = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epoch)
+                next_sched = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, self.args.epoch - steps[0])
             else:
+                for i in range(1, len(steps)):
+                    steps[i] -= steps[0]
                 next_sched = optim.lr_scheduler.MultiStepLR(self.optimizer, steps[1:])
             self.scheduler = GradualWarmupScheduler(self.optimizer, 
-                multiplier=1., total_epoch=steps[0], after_scheduler=next_sched)
+                multiplier=args.max_lr/args.min_lr, total_epoch=steps[0], after_scheduler=next_sched)
 
     def step_perc(self):
         self.remain_perc *= self.perc_mult
@@ -166,22 +170,27 @@ class LotteryTrainer():
         save_name = self.get_save_name('init')
         self.model.load_state_dict(torch.load(str(self.model_dir / save_name)))
 
+    def get_lr(self):
+        for param_group in self.optimizer.param_groups:
+            return param_group['lr']
+
     def train(self, epoch):
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
         losses = AverageMeter('Loss', ':.4e')
+        lrs = AverageMeter('LR', ':.4e')
         top1 = AverageMeter('Acc@1', ':6.2f')
         top5 = AverageMeter('Acc@5', ':6.2f')
         progress = ProgressMeter(
             len(self.train_loader),
-            [batch_time, data_time, losses, top1, top5],
-            prefix="Epoch: [{}]".format(epoch))
+            [batch_time, data_time, losses, lrs, top1, top5],
+            prefix=f"Epoch: [{epoch} - {self.remain_perc:4.2f}%]")
 
         # switch to train mode
         self.model.train()
-
         end = time.time()
         iters = len(self.train_loader)
+
         for i, (images, target) in enumerate(self.train_loader):
             # measure data loading time
             data_time.update(time.time() - end)
@@ -204,6 +213,7 @@ class LotteryTrainer():
             # measure accuracy and record loss
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             losses.update(loss.item(), images.size(0))
+            lrs.update(self.get_lr(), images.size(0))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
 
@@ -214,8 +224,6 @@ class LotteryTrainer():
 
             if self.sched_type == 'onecycle':
                 self.scheduler.step()
-            elif self.sched_type == 'sgdr':
-                self.scheduler.step((epoch - 1) + i / iters)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
@@ -225,6 +233,8 @@ class LotteryTrainer():
                 progress.display(i)
 
         if self.sched_type == 'step':
+            self.scheduler.step()
+        elif self.sched_type == 'warmup':
             self.scheduler.step()
 
     def test(self, epoch):

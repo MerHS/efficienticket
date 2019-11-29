@@ -102,8 +102,8 @@ def parse_args():
     parser.add_argument('--load', type=str, default="", help='Path to load network weights (if non-empty)')
 
     parser.add_argument('--sched', type=str, default='onecycle', choices=['onecycle', 'step', 'warmup'])
-    parser.add_argument('--min_lr', type=float, default=0.1, help='minimum lerning rate (for lr))')
-    parser.add_argument('--max_lr', type=float, default=1.0, help='maximum learning rate (default)')
+    parser.add_argument('--min_lr', type=float, default=0.01, help='minimum lerning rate (for lr))')
+    parser.add_argument('--max_lr', type=float, default=0.1, help='maximum learning rate (default)')
     parser.add_argument('--momentum', type=float, default=0.9, help='sgd momentum')
     parser.add_argument('--decay', type=float, default=3e-6, help='weight decay')
     parser.add_argument('--strategy', type=str, default='cos', choices=['cos', 'linear'], help='annealing strategy (default: cos)')
