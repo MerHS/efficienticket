@@ -128,7 +128,7 @@ class LotteryTrainer():
                 multiplier=args.max_lr/args.min_lr, total_epoch=steps[0], after_scheduler=next_sched)
 
     def step_perc(self):
-        self.remain_perc *= self.perc_mult
+        self.remain_perc *= (1 - self.perc_mult)
         self.load_initial_weight()
         self.init_trainer()
 

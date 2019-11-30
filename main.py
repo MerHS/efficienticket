@@ -61,18 +61,6 @@ def main(args):
 
         trainer.step_perc()
 
-    # print("Best Accuracy of Pruned Model: ", best_acc_pruned)
-
-    # print("Original Model Accuracy: ", best_acc_full)
-    # print("Pruned Model Accuracy: ", best_acc_pruned)
-    # print("Accuracy Difference Between Original Model & Pruned Model: ", (best_acc_full - best_acc_pruned))
-    # print("Accuracy Difference should be under 1% (accuracy difference < 1%)")
-
-    # print("Your Global Pruning Percentage: ", pruning_perc, "%")
-    # print("remaining params: ", dividend)
-    # print("total params: ", divisor)
-    # print("Global Pruning Percentage: ", 100 * (1 - dividend / divisor), "%")
-
 
 def parse_args():
     desc = "efficienticket: efficiency benchmark of lottery ticket hypothesis"
